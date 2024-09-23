@@ -5,7 +5,8 @@ import torch
 import torch.nn as nn 
 from torch.nn import functional as F 
 import math
-import os 
+import os
+import tiktoken
 os.environ['HF_HOME'] = r"/media/sunxu/HIKSEMI/Huggingface"
 #--------------------------------------------------------
 
@@ -49,10 +50,10 @@ class CasualSelfAttention(nn.Module):
         print(q.shape)
         att = (q@k.transpose(-2,-1)) * (1.0/math.sqrt(k.size(-1))) # attention 计算公式中的根号 
         # (B,num_head,T,head_size) @ (B,num_head,head_size,T) -> (B,num_head,T,T)
-        att = att.mask_fill(self.bias[:,:,T,T]==0,float('-inf')) # decoder 特点 保证了未来的token永远不会和前面联系
+        att = att.masked_fill(self.bias[:,:,T,T]==0,float('-inf')) # decoder 特点 保证了未来的token永远不会和前面联系
         att = F.softmax(att,dim=-1)
         y = att @ v #     B，num_head,T,T @ B,num_head,T,head_size -> B, num_head,T,head_size
-        y = y.transpose(1,2).continguous().view(B,T,C) # B,T,num_head,head_size -> 通过view 变回 B T C 
+        y = y.transpose(1,2).contiguous().view(B,T,C) # B,T,num_head,head_size -> 通过view 变回 B T C
         # output projection
         y = self.c_proj(y)
         return y 
@@ -137,7 +138,24 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(config.n_embed,config.vocab_size,bias=False)
         
-        # 但是我们想generate 就要有forward 
+        # 但是我们想generate 就要有forward
+    def forward(self,idx):
+        # we need to get B,T from the x
+        B,T = idx.size()
+        assert T <= self.config.block_size ,f"cannot forward, because it surpluses the longest sequences" # block size is the limit of the sequence length
+        # get pos, tok embedding
+        pos = torch.arange(0,T,dtype=torch.long,device=idx.device) # shape [T]
+        pos_embed = self.transformer.wpe(pos) # T, n_embed
+        tok_embed = self.transformer.wte(idx) # B,T,n_embed
+        x = tok_embed + pos_embed # B,T,n_embed
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x)
+        return logits
+
+
+
 
     @classmethod 
     def from_pretrained(cls,model_type):
@@ -192,3 +210,37 @@ class GPT(nn.Module):
 #-----------------------
 model = GPT.from_pretrained('gpt2')
 print("good")
+
+# first try with weight initlaized by huggingface
+
+num_return_sequences = 5
+
+max_length = 30
+model.eval()
+device = 'cuda'
+model.to(device)
+# prefix token
+
+
+enc = tiktoken.get_encoding('gpt2')
+tokens = enc.encode("Hello, I'm a language model,")
+tokens = torch.tensor(tokens, dtype=torch.long)
+tokens = tokens.unsqueeze(0).repeat(num_return_sequences,1)
+x = tokens.to(device)
+
+
+# print(x.size())
+while x.size(1) < max_length:
+    with torch.no_grad():
+        logits = model(x)
+        logits = logits[:,-1,:]
+        probs = F.softmax(logits,dim=-1)
+        topk_probs,topk_indices = torch.topk(probs, 50, dim=-1)
+        ix = torch.multinomial(topk_probs,1)
+        xcol = torch.gather(topk_indices,-1,ix)# xcol 是新生成的token
+        x = torch.cat((x,xcol),dim=-1) # 把xcol 和 x 拼接在一起 表示生成的old_token + new_token
+        # print(x)
+for i in range(num_return_sequences):
+    tokens = x[i,:max_length].tolist()
+    decoded = enc.decode(tokens)
+    print(">,",decoded)
