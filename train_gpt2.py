@@ -137,7 +137,24 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(config.n_embed,config.vocab_size,bias=False)
         
-        # 但是我们想generate 就要有forward 
+        # 但是我们想generate 就要有forward
+    def forward(self,idx):
+        # we need to get B,T from the x
+        B,T = idx.size()
+        assert T <= self.config.block_size ,f"cannot forward, because it surpluses the longest sequences" # block size is the limit of the sequence length
+        # get pos, tok embedding
+        pos = torch.arange(0,T,dtype=torch.long,device=idx.device) # shape [T]
+        pos_embed = self.transformer.wpe(pos) # T, n_embed
+        tok_embed = self.transformer.wte(idx) # B,T,n_embed
+        x = tok_embed + pos_embed # B,T,n_embed
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x)
+        return logits
+
+
+
 
     @classmethod 
     def from_pretrained(cls,model_type):
