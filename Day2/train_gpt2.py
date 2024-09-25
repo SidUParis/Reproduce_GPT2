@@ -255,6 +255,6 @@ for i in range(50):
     logits, loss = model(x,y)
     loss.backward()
     optimizer.step()
-    print(f"steps {step}, loss {loss.item()}")
+    print(f"steps {i}, loss {loss.item()}")
 import sys; sys.exit(0)
 

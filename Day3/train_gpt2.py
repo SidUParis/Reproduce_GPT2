@@ -57,7 +57,7 @@ class CasualSelfAttention(nn.Module):
                                                                   2)  # (B，T，num_head,channel(head size)) 专制变成 -> (B,num_head,T,head_size)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1,
                                                                   2)  # B，T，num_head,channel(head size)) 专制变成 -> (B,num_head,T,head_size)
-        print(q.shape)
+        # print(q.shape)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))  # attention 计算公式中的根号
         # (B,num_head,T,head_size) @ (B,num_head,head_size,T) -> (B,num_head,T,T)
         att = att.masked_fill(self.bias[:, :, T, T] == 0, float('-inf'))  # decoder 特点 保证了未来的token永远不会和前面联系
@@ -272,6 +272,6 @@ for i in range(50):
     logits, loss = model(x,y)
     loss.backward()
     optimizer.step()
-    print(f"steps {step}, loss {loss.item()}")
+    print(f"steps {i}, loss {loss.item()}")
 import sys; sys.exit(0)
 
